@@ -1,14 +1,49 @@
-# Review NLP classifier
+# Game-review NLP classifier
 
-A small, explainable baseline for classifying review comments into:
+This project classifies a game review from its text. At prediction time, the
+input is **only the comment**. The classifier predicts a sentiment and one or
+more reasons from the matching sentiment's category list.
 
-1. **Sentiment:** `0` (negative) or `1` (positive).
-2. **Aspects:** any combination of `hygiene`, `taste`, `customer service`,
-   `location`, `transportation options`, and `wait times`.
+## Reason categories
 
-Aspect classification is multi-label: a comment may have zero, one, or several
-aspects. The model uses TF-IDF text features with logistic-regression
-classifiers. It does not include or generate a dataset.
+**Negative reviews (`0`)**
+
+- optimization
+- FPS drops
+- bad community
+- hard game
+- connectivity issues
+- price
+- bugs/glitches
+- poor controls
+- poor soundtrack/audio
+- low replayability
+
+**Positive reviews (`1`)**
+
+- fun to play
+- multiplayer accessible
+- mod compatible
+- graphically pleasing
+- developer connection
+- depth
+- gameplay
+- story driven
+- responsive controls
+- good soundtrack/audio
+- high replayability
+
+A review may receive multiple reasons, but every selected reason comes only
+from the list matching its predicted sentiment. No other categories are
+included.
+
+## How the model works
+
+The baseline uses TF-IDF text features with logistic-regression classifiers.
+It predicts sentiment (`0` = negative, `1` = positive), then selects zero or
+more reasons from that sentiment's list. The CLI returns JSON fields for the
+comment, numeric sentiment, sentiment label, and selected `reason` labels.
+Reasons are category labels, not a generated free-text explanation.
 
 ## Install
 
@@ -23,54 +58,42 @@ python -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-## Training data (for when your labeled data is ready)
+## Training data
 
-Training requires example comments paired with their correct sentiment and
-reasoning labels, so the model can learn the relationship. The training command
-will read a UTF-8 CSV with these columns:
+Training requires labeled examples so the model can learn from comments and
+their sentiment/reason labels. No data is included in this repository. When
+your training data is ready, provide a UTF-8 CSV with these columns:
 
 ```csv
-comment,sentiment,reasoning
-"A labeled training comment",1,"taste|wait times"
+comment,sentiment,reason
 ```
 
-`sentiment` accepts `0`/`negative` or `1`/`positive`. `reasoning` is a
-`|`-separated set of labels from the six categories above; leave it blank (or
-use `none`) when no category applies. `aspects` is also accepted as the third
-column name. No training data is included in this repo.
+`sentiment` accepts `0`/`negative` or `1`/`positive`. Put one or more reason
+labels in `reason`, separated by `|`. Leave it blank or use `none` if no listed
+reason applies. Reasons must match the list above and must be compatible with
+the row's sentiment.
 
-## Prediction input and output
+## Train, predict, and evaluate
 
-At prediction time, provide **only the comment**—not its sentiment or reasoning:
-
-```bash
-python src/classifier.py predict --text "The meal was delicious, but service was slow."
-```
-
-The output contains the predicted sentiment and `reasoning`, a list containing
-zero or more selected categories. These are category labels, not a generated
-free-text explanation.
-
-## Train and evaluate
-
-Once you have labeled training data:
+Train the model:
 
 ```bash
 python src/classifier.py train --data path/to/training.csv
 ```
 
-The model is saved to `models/review_classifier.joblib` by default. You can
-choose another path with `--model`. Prediction prints JSON with the sentiment,
-confidence, selected reasoning categories, and per-category scores. Adjust the
-category cutoff with `--threshold 0.4` if needed.
+The model is saved to `models/review_classifier.joblib` by default. Predict
+from a comment only:
 
-Evaluate using a separate, held-out CSV with the same format:
+```bash
+python src/classifier.py predict --text "Your game review text goes here."
+```
+
+The optional `--threshold` argument changes the cutoff for selecting reasons
+(default `0.5`). Evaluate with a separate held-out CSV in the same format:
 
 ```bash
 python src/classifier.py evaluate --data path/to/held_out.csv
 ```
 
-Keep training and held-out comments separate. The held-out set is for measuring
-performance, not for training. A useful model needs labeled examples for both
-sentiments and positive examples of each aspect; this baseline will warn when
-an aspect has no positive training examples.
+Keep training and held-out comments separate. The model needs examples from
+both sentiment classes and examples for each reason you want it to learn.
