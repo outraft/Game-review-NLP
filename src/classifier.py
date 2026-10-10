@@ -1,8 +1,8 @@
-"""Train and use a TF-IDF review classifier.
+"""Train and use a TF-IDF game-review classifier.
 
-Each review gets a binary sentiment prediction and zero or more aspect labels.
-CSV input columns: comment, sentiment, aspects (or reasoning). Aspect labels
-are separated with |, for example: taste|wait times.
+Each review gets a binary sentiment prediction and zero or more matching
+reasons. CSV input columns: comment, sentiment, reason. Multiple reasons are
+separated with |.
 """
 
 from __future__ import annotations
@@ -22,19 +22,38 @@ from sklearn.metrics import accuracy_score, f1_score
 from sklearn.dummy import DummyClassifier
 
 
-ASPECTS = (
-    "hygiene",
-    "taste",
-    "customer service",
-    "location",
-    "transportation options",
-    "wait times",
+NEGATIVE_REASONS = (
+    "optimization",
+    "FPS drops",
+    "bad community",
+    "hard game",
+    "connectivity issues",
+    "price",
+    "bugs/glitches",
+    "poor controls",
+    "poor soundtrack/audio",
+    "low replayability",
 )
-MODEL_VERSION = 1
+POSITIVE_REASONS = (
+    "fun to play",
+    "multiplayer accessible",
+    "mod compatible",
+    "graphically pleasing",
+    "developer connection",
+    "depth",
+    "gameplay",
+    "story driven",
+    "responsive controls",
+    "good soundtrack/audio",
+    "high replayability",
+)
+REASONS = tuple(dict.fromkeys(NEGATIVE_REASONS + POSITIVE_REASONS))
+REASON_LOOKUP = {reason.lower(): reason for reason in REASONS}
+MODEL_VERSION = 3
 
 
-def normalize_aspect(value: str) -> str:
-    """Normalize common CSV spellings to one of the supported aspect names."""
+def normalize_reason(value: str) -> str:
+    """Normalize capitalization, underscores, and whitespace in reason labels."""
     return " ".join(value.strip().lower().replace("_", " ").split())
 
 
@@ -53,7 +72,7 @@ def read_dataset(path: Path) -> tuple[list[str], np.ndarray, np.ndarray]:
     """Read and validate labeled CSV rows."""
     texts: list[str] = []
     sentiments: list[int] = []
-    aspect_rows: list[list[int]] = []
+    reason_rows: list[list[int]] = []
 
     with path.open("r", encoding="utf-8-sig", newline="") as csv_file:
         reader = csv.DictReader(csv_file)
@@ -63,9 +82,9 @@ def read_dataset(path: Path) -> tuple[list[str], np.ndarray, np.ndarray]:
         columns = {name.strip().lower(): name for name in reader.fieldnames if name}
         if "comment" not in columns or "sentiment" not in columns:
             raise ValueError("CSV must have 'comment' and 'sentiment' columns.")
-        aspects_column = columns.get("aspects") or columns.get("reasoning")
-        if not aspects_column:
-            raise ValueError("CSV must have an 'aspects' or 'reasoning' column.")
+        reason_column = columns.get("reason")
+        if not reason_column:
+            raise ValueError("CSV must have a 'reason' column.")
 
         for row_number, row in enumerate(reader, start=2):
             comment = (row.get(columns["comment"]) or "").strip()
@@ -73,25 +92,35 @@ def read_dataset(path: Path) -> tuple[list[str], np.ndarray, np.ndarray]:
                 raise ValueError(f"Row {row_number}: comment cannot be empty.")
 
             sentiment = parse_sentiment(row.get(columns["sentiment"]) or "", row_number)
-            raw_aspects = (row.get(aspects_column) or "").strip()
+            raw_reasons = (row.get(reason_column) or "").strip()
             selected: set[str] = set()
-            if raw_aspects.lower() not in {"", "none", "null", "[]"}:
-                for raw_aspect in raw_aspects.split("|"):
-                    aspect = normalize_aspect(raw_aspect)
-                    if aspect not in ASPECTS:
+            if raw_reasons.lower() not in {"", "none", "null", "[]"}:
+                for raw_reason in raw_reasons.split("|"):
+                    normalized_reason = normalize_reason(raw_reason)
+                    if normalized_reason not in REASON_LOOKUP:
                         raise ValueError(
-                            f"Row {row_number}: unknown aspect {raw_aspect!r}. "
-                            f"Choose from: {', '.join(ASPECTS)}."
+                            f"Row {row_number}: unknown reason {raw_reason!r}. "
+                            f"Choose from: {', '.join(REASONS)}."
                         )
-                    selected.add(aspect)
+                    reason = REASON_LOOKUP[normalized_reason]
+                    selected.add(reason)
+
+            allowed_reasons = POSITIVE_REASONS if sentiment == 1 else NEGATIVE_REASONS
+            mismatched_reasons = selected.difference(allowed_reasons)
+            if mismatched_reasons:
+                sentiment_name = "positive" if sentiment == 1 else "negative"
+                raise ValueError(
+                    f"Row {row_number}: {sentiment_name} sentiment cannot use reason(s): "
+                    f"{', '.join(sorted(mismatched_reasons))}."
+                )
 
             texts.append(comment)
             sentiments.append(sentiment)
-            aspect_rows.append([int(aspect in selected) for aspect in ASPECTS])
+            reason_rows.append([int(reason in selected) for reason in REASONS])
 
     if not texts:
         raise ValueError(f"{path} has a header but no labeled rows.")
-    return texts, np.asarray(sentiments, dtype=int), np.asarray(aspect_rows, dtype=int)
+    return texts, np.asarray(sentiments, dtype=int), np.asarray(reason_rows, dtype=int)
 
 
 def make_vectorizer() -> TfidfVectorizer:
@@ -106,7 +135,7 @@ def make_vectorizer() -> TfidfVectorizer:
 
 
 def train(data_path: Path, model_path: Path) -> None:
-    texts, sentiment_targets, aspect_targets = read_dataset(data_path)
+    texts, sentiment_targets, reason_targets = read_dataset(data_path)
     if len(set(sentiment_targets.tolist())) < 2:
         raise ValueError("Training data must contain both positive and negative examples.")
 
@@ -115,38 +144,38 @@ def train(data_path: Path, model_path: Path) -> None:
     sentiment_model = LogisticRegression(class_weight="balanced", max_iter=1000)
     sentiment_model.fit(features, sentiment_targets)
 
-    aspect_models: dict[str, Any] = {}
-    for index, aspect in enumerate(ASPECTS):
-        targets = aspect_targets[:, index]
+    reason_models: dict[str, Any] = {}
+    for index, reason in enumerate(REASONS):
+        targets = reason_targets[:, index]
         if len(set(targets.tolist())) == 1:
-            # Keep training usable while being explicit that an aspect with no
+            # Keep training usable while being explicit that a reason with no
             # positive examples cannot be learned from this dataset.
             model = DummyClassifier(strategy="constant", constant=int(targets[0]))
         else:
             model = LogisticRegression(class_weight="balanced", max_iter=1000)
         model.fit(features, targets)
-        aspect_models[aspect] = model
+        reason_models[reason] = model
 
     model_path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(
         {
             "version": MODEL_VERSION,
-            "aspects": ASPECTS,
+            "reasons": REASONS,
             "vectorizer": vectorizer,
             "sentiment_model": sentiment_model,
-            "aspect_models": aspect_models,
+            "reason_models": reason_models,
         },
         model_path,
     )
 
     print(f"Trained on {len(texts)} labeled comments.")
     print(f"Saved model to {model_path}")
-    for index, aspect in enumerate(ASPECTS):
-        positives = int(aspect_targets[:, index].sum())
+    for index, reason in enumerate(REASONS):
+        positives = int(reason_targets[:, index].sum())
         if positives == 0:
-            print(f"Warning: no training examples labeled '{aspect}'; it will always predict absent.")
+            print(f"Warning: no training examples labeled '{reason}'; it will always predict absent.")
         elif positives == len(texts):
-            print(f"Warning: every training example is labeled '{aspect}'; it will always predict present.")
+            print(f"Warning: every training example is labeled '{reason}'; it will always predict present.")
 
 
 def load_model(path: Path) -> dict[str, Any]:
@@ -167,13 +196,14 @@ def predict_rows(model: dict[str, Any], texts: list[str], threshold: float) -> l
     for row_index, text in enumerate(texts):
         positive_probability = float(sentiment_probabilities[row_index])
         sentiment = int(positive_probability >= 0.5)
-        aspect_scores: dict[str, float] = {}
-        for aspect in model["aspects"]:
-            aspect_model = model["aspect_models"][aspect]
-            probabilities = aspect_model.predict_proba(features[row_index])[0]
-            positive_class = np.flatnonzero(aspect_model.classes_ == 1)
+        allowed_reasons = POSITIVE_REASONS if sentiment == 1 else NEGATIVE_REASONS
+        reason_scores: dict[str, float] = {}
+        for reason in allowed_reasons:
+            reason_model = model["reason_models"][reason]
+            probabilities = reason_model.predict_proba(features[row_index])[0]
+            positive_class = np.flatnonzero(reason_model.classes_ == 1)
             # A constant classifier has only one probability column.
-            aspect_scores[aspect] = float(probabilities[positive_class[0]]) if len(positive_class) else 0.0
+            reason_scores[reason] = float(probabilities[positive_class[0]]) if len(positive_class) else 0.0
         predictions.append(
             {
                 "comment": text,
@@ -181,45 +211,45 @@ def predict_rows(model: dict[str, Any], texts: list[str], threshold: float) -> l
                 "sentiment_label": "positive" if sentiment else "negative",
                 "sentiment_confidence": round(max(positive_probability, 1 - positive_probability), 4),
                 "positive_probability": round(positive_probability, 4),
-                "reasoning": [aspect for aspect, score in aspect_scores.items() if score >= threshold],
-                "aspect_scores": {aspect: round(score, 4) for aspect, score in aspect_scores.items()},
+                "reason": [reason for reason, score in reason_scores.items() if score >= threshold],
+                "reason_scores": {reason: round(score, 4) for reason, score in reason_scores.items()},
             }
         )
     return predictions
 
 
 def evaluate(data_path: Path, model_path: Path, threshold: float) -> None:
-    texts, sentiment_targets, aspect_targets = read_dataset(data_path)
+    texts, sentiment_targets, reason_targets = read_dataset(data_path)
     model = load_model(model_path)
     predictions = predict_rows(model, texts, threshold)
     sentiment_predictions = np.asarray([item["sentiment"] for item in predictions])
-    aspect_predictions = np.asarray(
-        [[int(aspect in item["reasoning"]) for aspect in model["aspects"]] for item in predictions]
+    reason_predictions = np.asarray(
+        [[int(reason in item["reason"]) for reason in model["reasons"]] for item in predictions]
     )
 
     print(f"Evaluated on {len(texts)} held-out comments")
     print(f"Sentiment accuracy: {accuracy_score(sentiment_targets, sentiment_predictions):.3f}")
     print(f"Sentiment macro F1: {f1_score(sentiment_targets, sentiment_predictions, average='macro', zero_division=0):.3f}")
-    print(f"Aspects micro F1: {f1_score(aspect_targets, aspect_predictions, average='micro', zero_division=0):.3f}")
-    print(f"Aspects macro F1: {f1_score(aspect_targets, aspect_predictions, average='macro', zero_division=0):.3f}")
-    print("\nPer-aspect F1:")
-    for index, aspect in enumerate(model["aspects"]):
-        score = f1_score(aspect_targets[:, index], aspect_predictions[:, index], zero_division=0)
-        print(f"  {aspect}: {score:.3f}")
+    print(f"Reason micro F1: {f1_score(reason_targets, reason_predictions, average='micro', zero_division=0):.3f}")
+    print(f"Reason macro F1: {f1_score(reason_targets, reason_predictions, average='macro', zero_division=0):.3f}")
+    print("\nPer-reason F1:")
+    for index, reason in enumerate(model["reasons"]):
+        score = f1_score(reason_targets[:, index], reason_predictions[:, index], zero_division=0)
+        print(f"  {reason}: {score:.3f}")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Review sentiment and aspect classification")
+    parser = argparse.ArgumentParser(description="Game-review sentiment and reason classification")
     commands = parser.add_subparsers(dest="command", required=True)
 
     train_parser = commands.add_parser("train", help="train classifiers from a labeled CSV")
-    train_parser.add_argument("--data", type=Path, required=True, help="CSV with comment, sentiment, and aspects columns")
+    train_parser.add_argument("--data", type=Path, required=True, help="CSV with comment, sentiment, and reason columns")
     train_parser.add_argument("--model", type=Path, default=Path("models/review_classifier.joblib"))
 
     predict_parser = commands.add_parser("predict", help="classify one comment")
     predict_parser.add_argument("--text", required=True, help="comment to classify")
     predict_parser.add_argument("--model", type=Path, default=Path("models/review_classifier.joblib"))
-    predict_parser.add_argument("--threshold", type=float, default=0.5, help="aspect probability threshold (default: 0.5)")
+    predict_parser.add_argument("--threshold", type=float, default=0.5, help="reason probability threshold (default: 0.5)")
 
     evaluate_parser = commands.add_parser("evaluate", help="evaluate against a separate labeled CSV")
     evaluate_parser.add_argument("--data", type=Path, required=True, help="held-out labeled CSV")
