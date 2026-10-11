@@ -1,44 +1,67 @@
+"""Create reproducible, stratified train/validation CSV splits."""
 
+from __future__ import annotations
+
+import argparse
 import csv
-import random
+from pathlib import Path
 
-positive = []
-negative = []
+from sklearn.model_selection import train_test_split
 
-with open("steam_reviews_cleaned.csv", "r", encoding="utf-8") as file:
-    reader = csv.DictReader(file)
-    columns = reader.fieldnames
 
-    for row in reader:
-        if row["label"] == "1":
-            positive.append(row)
-        elif row["label"] == "0":
-            negative.append(row)
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_INPUT = PROJECT_ROOT / "data" / "processed" / "steam_reviews_cleaned.csv"
+DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "splits"
 
-random.seed(42)
 
-random.shuffle(positive)
-random.shuffle(negative)
+def split_data(input_path: Path, output_dir: Path, validation_size: float, seed: int) -> None:
+    with input_path.open("r", encoding="utf-8-sig", newline="") as source:
+        reader = csv.DictReader(source)
+        if not reader.fieldnames:
+            raise ValueError(f"{input_path} is empty or missing a header.")
+        fields = reader.fieldnames
+        columns = {name.strip().lower(): name for name in fields if name}
+        if "sentiment" not in columns:
+            raise ValueError("Input CSV must include a 'sentiment' column.")
+        rows = list(reader)
 
-positive_split = int(len(positive) * 0.8)
-negative_split = int(len(negative) * 0.8)
+    labels = [row[columns["sentiment"]].strip() for row in rows]
+    if len(set(labels)) < 2:
+        raise ValueError("Need examples from both sentiment classes to make a stratified split.")
 
-training = positive[:positive_split] + negative[:negative_split]
-validation = positive[positive_split:] + negative[negative_split:]
+    training, validation = train_test_split(
+        rows,
+        test_size=validation_size,
+        random_state=seed,
+        stratify=labels,
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for filename, split_rows in (("train.csv", training), ("validation.csv", validation)):
+        with (output_dir / filename).open("w", encoding="utf-8", newline="") as target:
+            writer = csv.DictWriter(target, fieldnames=fields, quoting=csv.QUOTE_ALL)
+            writer.writeheader()
+            writer.writerows(split_rows)
 
-random.shuffle(training)
-random.shuffle(validation)
+    print(f"Training reviews: {len(training)}")
+    print(f"Validation reviews: {len(validation)}")
+    print(f"Total reviews: {len(training) + len(validation)}")
+    for label in sorted(set(labels)):
+        train_count = sum(row[columns["sentiment"]] == label for row in training)
+        validation_count = sum(row[columns["sentiment"]] == label for row in validation)
+        print(f"Sentiment {label}: train={train_count}, validation={validation_count}")
 
-with open("train.csv", "w", encoding="utf-8", newline="") as file:
-    writer = csv.DictWriter(file, fieldnames=columns)
-    writer.writeheader()
-    writer.writerows(training)
 
-with open("validation.csv", "w", encoding="utf-8", newline="") as file:
-    writer = csv.DictWriter(file, fieldnames=columns)
-    writer.writeheader()
-    writer.writerows(validation)
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Create train/validation data splits.")
+    parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--validation-size", type=float, default=0.2)
+    parser.add_argument("--seed", type=int, default=42)
+    args = parser.parse_args()
+    if not 0 < args.validation_size < 1:
+        parser.error("--validation-size must be between 0 and 1")
+    split_data(args.input, args.output_dir, args.validation_size, args.seed)
 
-print("Training reviews:", len(training))
-print("Validation reviews:", len(validation))
-print("Total reviews:", len(training) + len(validation))
+
+if __name__ == "__main__":
+    main()

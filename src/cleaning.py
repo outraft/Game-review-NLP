@@ -1,166 +1,126 @@
+"""Validate and deduplicate the normalized Steam review CSV."""
 
+from __future__ import annotations
+
+import argparse
 import csv
+from collections import defaultdict
+from pathlib import Path
 
 
-def check_labels(input_file):
-    labels = {}
-    conflicts = []
-
-    with open(input_file, "r", encoding="utf-8-sig", newline="") as file:
-        reader = csv.DictReader(file)
-
-        for row in reader:
-            comment = row["comment"].strip().lower()
-            label = row["label"].strip()
-
-            if comment in labels:
-                if labels[comment] != label:
-                    if comment not in conflicts:
-                        conflicts.append(comment)
-            else:
-                labels[comment] = label
-
-    with open("conflicting_reviews.csv", "w", encoding="utf-8", newline="") as file:
-        writer = csv.writer(file)
-        writer.writerow(["comment"])
-
-        for comment in conflicts:
-            writer.writerow([comment])
-
-    print("Conflicting reviews:", len(conflicts))
-
-    return conflicts
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_INPUT = PROJECT_ROOT / "data" / "raw" / "steam_reviews.csv"
+DEFAULT_OUTPUT = PROJECT_ROOT / "data" / "processed" / "steam_reviews_cleaned.csv"
+DEFAULT_CONFLICTS = PROJECT_ROOT / "data" / "audit" / "conflicting_reviews.csv"
 
 
-def clean_reviews(input_file, output_file, conflicts):
-    reviews = []
-    comments = []
+def normalize_comment(comment: str) -> str:
+    return " ".join(comment.casefold().split())
 
-    meaningless = [
-        "jh", "h", "o", "n", "x", "l", "m",
-        "d", "s", "z", "q", "g", "y", "f",
-        "j", "n/a", "+++", ".q", ".!.", "ㅤ",
-        "fht6u", "ed3wq", "wdawd", "dsfds",
-        "kljh", "drff", "asds", "fddfff",
-        "jbyfkb", "dddd", "eere", "gfdgfd",
-        "yjtyh", "sddsad", "gfgf", "....",
-        "******", "‎", "dfhgrdfg", "rfgdgfd",
-        "llllllllllll", "lllplplp", "ffghhhjgffffgh",
-        "xfcghbdmbnjvhgchrfdfh", "gvffhsbddfgsbbfd",
-        "ggggggggggggggggggggggggggggggggg",
-        "brvrfgh"
-    ]
 
-    punctuation = [".", "..", ",", "!", "?", ";", "،"]
+def parse_sentiment(value: str, row_number: int) -> str:
+    normalized = value.strip().lower()
+    if normalized in {"1", "positive", "pos", "true"}:
+        return "1"
+    if normalized in {"0", "negative", "neg", "false"}:
+        return "0"
+    raise ValueError(f"Row {row_number}: invalid sentiment {value!r}; expected 0/1.")
 
-    corrections = {
-        "loved this game": "1",
-        "best game ever! 🤩": "1",
-        "i hate this.": "0"
-    }
 
-    empty_count = 0
-    duplicate_count = 0
-    meaningless_count = 0
-    conflict_count = 0
-    corrected_count = 0
+def clean_reviews(input_path: Path, output_path: Path, conflict_path: Path) -> tuple[int, int]:
+    with input_path.open("r", encoding="utf-8-sig", newline="") as source:
+        reader = csv.DictReader(source)
+        if not reader.fieldnames:
+            raise ValueError(f"{input_path} is empty or missing a header.")
+        fields = reader.fieldnames
+        columns = {name.strip().lower(): name for name in fields if name}
+        if "comment" not in columns or "sentiment" not in columns:
+            raise ValueError("Input CSV must include 'comment' and 'sentiment' columns.")
 
-    with open(input_file, "r", encoding="utf-8-sig", newline="") as file:
-        reader = csv.DictReader(file)
-        columns = reader.fieldnames
+        raw_rows = list(reader)
 
-        for row in reader:
-            comment = row["comment"].strip()
-            lower_comment = comment.lower()
+    # Remove all copies of an identical text if it was assigned conflicting
+    # sentiments; retaining one would make the target label ambiguous.
+    labels_by_comment: dict[str, set[str]] = defaultdict(set)
+    counts_by_comment: dict[str, int] = defaultdict(int)
+    for row_number, row in enumerate(raw_rows, start=2):
+        text = (row.get(columns["comment"]) or "").strip()
+        if not text:
+            continue
+        label = parse_sentiment(row.get(columns["sentiment"]) or "", row_number)
+        key = normalize_comment(text)
+        labels_by_comment[key].add(label)
+        counts_by_comment[key] += 1
 
-            if comment == "":
-                empty_count += 1
-                continue
+    conflicts = {text for text, labels in labels_by_comment.items() if len(labels) > 1}
+    conflict_path.parent.mkdir(parents=True, exist_ok=True)
+    with conflict_path.open("w", encoding="utf-8", newline="") as audit_file:
+        writer = csv.writer(audit_file)
+        writer.writerow(["normalized_comment", "sentiment_labels", "row_count"])
+        for text in sorted(conflicts):
+            labels = "|".join(sorted(labels_by_comment[text]))
+            writer.writerow([text, labels, counts_by_comment[text]])
 
-            if lower_comment in conflicts:
-                conflict_count += 1
-                continue
+    kept_rows: list[dict[str, str]] = []
+    seen_review_ids: set[tuple[str, str]] = set()
+    seen_comments: set[str] = set()
+    removed_empty = removed_conflict = removed_duplicate_id = removed_duplicate_text = 0
 
-            if lower_comment in comments:
-                duplicate_count += 1
-                continue
+    for row_number, row in enumerate(raw_rows, start=2):
+        text = (row.get(columns["comment"]) or "").strip()
+        if not text:
+            removed_empty += 1
+            continue
+        label = parse_sentiment(row.get(columns["sentiment"]) or "", row_number)
+        normalized = normalize_comment(text)
+        if normalized in conflicts:
+            removed_conflict += 1
+            continue
 
-            if comment.isdigit():
-                meaningless_count += 1
-                continue
+        # A Steam recommendation ID is unique per game. Legacy rows without
+        # IDs fall back to text deduplication below.
+        app_id = (row.get(columns.get("app_id", "")) or "").strip()
+        review_id = (row.get(columns.get("steam_review_id", "")) or "").strip()
+        identity = (app_id, review_id)
+        if review_id and identity in seen_review_ids:
+            removed_duplicate_id += 1
+            continue
+        if normalized in seen_comments:
+            removed_duplicate_text += 1
+            continue
 
-            if lower_comment in meaningless:
-                meaningless_count += 1
-                continue
+        row[columns["comment"]] = text
+        row[columns["sentiment"]] = label
+        kept_rows.append(row)
+        seen_comments.add(normalized)
+        if review_id:
+            seen_review_ids.add(identity)
 
-            if comment in punctuation:
-                meaningless_count += 1
-                continue
-
-            if all(not character.isalnum() for character in comment):
-                meaningless_count += 1
-                continue
-
-            row["comment"] = comment
-
-            if lower_comment in corrections:
-                new_label = corrections[lower_comment]
-
-                if row["label"] != new_label:
-                    corrected_count += 1
-
-                row["label"] = new_label
-
-            if row["label"] == "1":
-                row["positive or negative"] = "positive"
-
-            elif row["label"] == "0":
-                row["positive or negative"] = "negative"
-
-            else:
-                continue
-
-            reviews.append(row)
-            comments.append(lower_comment)
-
-    with open(output_file, "w", encoding="utf-8", newline="") as file:
-        writer = csv.DictWriter(file, fieldnames=columns)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8", newline="") as cleaned_file:
+        writer = csv.DictWriter(cleaned_file, fieldnames=fields, quoting=csv.QUOTE_ALL)
         writer.writeheader()
-        writer.writerows(reviews)
+        writer.writerows(kept_rows)
 
-    print("Cleaning completed.")
-    print("Empty reviews removed:", empty_count)
-    print("Duplicate reviews removed:", duplicate_count)
-    print("Meaningless reviews removed:", meaningless_count)
-    print("Conflicting review rows removed:", conflict_count)
-    print("Incorrect labels corrected:", corrected_count)
-    print("Final number of reviews:", len(reviews))
-
-
-def count_labels(input_file):
-    positive = 0
-    negative = 0
-
-    with open(input_file, "r", encoding="utf-8-sig", newline="") as file:
-        reader = csv.DictReader(file)
-
-        for row in reader:
-            if row["label"] == "1":
-                positive += 1
-            elif row["label"] == "0":
-                negative += 1
-
-    print("Positive reviews:", positive)
-    print("Negative reviews:", negative)
-    print("Total reviews:", positive + negative)
+    print(f"Input rows: {len(raw_rows)}")
+    print(f"Removed empty comments: {removed_empty}")
+    print(f"Removed conflicting-text rows: {removed_conflict}")
+    print(f"Removed duplicate Steam IDs: {removed_duplicate_id}")
+    print(f"Removed duplicate comments: {removed_duplicate_text}")
+    print(f"Clean rows: {len(kept_rows)}")
+    print(f"Conflict audit: {conflict_path}")
+    print(f"Cleaned CSV: {output_path}")
+    return len(raw_rows), len(kept_rows)
 
 
-conflicts = check_labels("steam_reviews_raw.csv")
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Clean and validate Steam review CSV data.")
+    parser.add_argument("--input", type=Path, default=DEFAULT_INPUT)
+    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--conflicts", type=Path, default=DEFAULT_CONFLICTS)
+    args = parser.parse_args()
+    clean_reviews(args.input, args.output, args.conflicts)
 
-clean_reviews(
-    "steam_reviews_raw.csv",
-    "steam_reviews_cleaned.csv",
-    conflicts
-)
 
-count_labels("steam_reviews_cleaned.csv")
+if __name__ == "__main__":
+    main()

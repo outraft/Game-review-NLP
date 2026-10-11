@@ -10,21 +10,21 @@ data-cleaning pipeline.
 Endpoint:  https://store.steampowered.com/appreviews/<APP_ID>?json=1
 Docs:      https://partner.steamgames.com/doc/store/getreviews
 
-Output columns (steam_reviews_raw.csv):
-    comment              raw review text
-    label                1 = positive (voted_up True), 0 = negative
-    positive or negative "positive" / "negative"
-    votes_up             number of "helpful" votes the review received
-    weighted_vote_score  Steam's helpfulness weight (0.0 - 1.0)
+Output columns (`data/raw/steam_reviews.csv`):
+    steam_review_id, app_id, game_title, comment, sentiment, reason,
+    created_at, votes_up, weighted_vote_score
+
+`reason` is intentionally blank: Steam does not supply the project's reason
+categories. The score fields are retained as metadata, not training weights.
 
 Positive and negative reviews are fetched separately (review_type=positive /
 review_type=negative) so each game contributes an equal number of each,
 giving a class-balanced dataset.
 
 Usage:
-    python steam_scraper.py                        # defaults below
-    python steam_scraper.py --per-class 500 --apps 1091500 730 271590
-    python steam_scraper.py --output data/steam_reviews_raw.csv --delay 1.5
+    python src/steam_scraper.py                    # 12,000 review target
+    python src/steam_scraper.py --per-class 500 --apps 1091500 730 271590
+    python src/steam_scraper.py --output data/raw/custom.csv --delay 1.5
 """
 
 from __future__ import annotations
@@ -35,6 +35,8 @@ import logging
 import random
 import sys
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, Iterator, List, Optional
 
 import requests
@@ -45,24 +47,33 @@ import requests
 
 BASE_URL = "https://store.steampowered.com/appreviews/{app_id}"
 
-# Default target games: app_id -> human-readable name (used only for logging).
+# Six popular games provide variety and a 12,000-review default target.
 DEFAULT_APPS: Dict[int, str] = {
     1091500: "Cyberpunk 2077",
     730: "Counter-Strike 2",
     271590: "Grand Theft Auto V",
+    292030: "The Witcher 3: Wild Hunt",
+    1086940: "Baldur's Gate 3",
+    1245620: "ELDEN RING",
 }
 
-DEFAULT_PER_CLASS = 500        # reviews per class per game -> 1000 per game
+DEFAULT_PER_CLASS = 1000       # 1000 positive + 1000 negative per game
+DEFAULT_MINIMUM_TOTAL = 10000
 PAGE_SIZE = 100                # Steam's maximum num_per_page
-DEFAULT_DELAY = 1.0            # seconds between requests (rate limiting)
+DEFAULT_DELAY = 1.25           # seconds between requests (rate limiting)
 MAX_RETRIES = 5                # retries on 429 / 5xx / network errors
 REQUEST_TIMEOUT = 30           # seconds
-DEFAULT_OUTPUT = "steam_reviews_raw.csv"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_OUTPUT = PROJECT_ROOT / "data" / "raw" / "steam_reviews.csv"
 
 CSV_COLUMNS = [
+    "steam_review_id",
+    "app_id",
+    "game_title",
     "comment",
-    "label",
-    "positive or negative",
+    "sentiment",
+    "reason",
+    "created_at",
     "votes_up",
     "weighted_vote_score",
 ]
@@ -78,7 +89,7 @@ def build_session() -> requests.Session:
     """Create a requests session with a descriptive User-Agent."""
     session = requests.Session()
     session.headers.update(
-        {"User-Agent": "nlp-project-1 review scraper (academic research)"}
+        {"User-Agent": "game-review-nlp/1.0 (educational research project)"}
     )
     return session
 
@@ -199,7 +210,7 @@ def iter_reviews(
 # Transformation
 # --------------------------------------------------------------------------- #
 
-def to_row(review: dict) -> Optional[dict]:
+def to_row(review: dict, app_id: int) -> Optional[dict]:
     """
     Map a raw Steam review object to the output CSV schema.
     Returns None for reviews with empty text (useless for NLP).
@@ -214,10 +225,23 @@ def to_row(review: dict) -> Optional[dict]:
     except (TypeError, ValueError):
         score = 0.0
 
+    try:
+        created_at = datetime.fromtimestamp(
+            int(review.get("timestamp_created", 0) or 0), tz=timezone.utc
+        ).isoformat()
+    except (TypeError, ValueError, OSError):
+        created_at = ""
+
     return {
+        "steam_review_id": str(review.get("recommendationid", "")),
+        "app_id": app_id,
+        "game_title": DEFAULT_APPS.get(app_id, str(app_id)),
         "comment": text,
-        "label": 1 if voted_up else 0,
-        "positive or negative": "positive" if voted_up else "negative",
+        "sentiment": 1 if voted_up else 0,
+        # Steam supplies sentiment, but not our project-specific reason labels.
+        # Empty means awaiting reason annotation; "none" will mean reviewed and no match.
+        "reason": "",
+        "created_at": created_at,
         "votes_up": int(review.get("votes_up", 0) or 0),
         "weighted_vote_score": score,
     }
@@ -234,12 +258,19 @@ def scrape_app(
     log.info("Scraping %s (%s)", name, app_id)
 
     rows_by_class: Dict[str, List[dict]] = {}
+    seen_review_ids: set[str] = set()
     for review_type in ("positive", "negative"):
         rows = []
         for review in iter_reviews(session, app_id, review_type, per_class, delay):
-            row = to_row(review)
+            review_id = str(review.get("recommendationid", ""))
+            if review_id and review_id in seen_review_ids:
+                log.warning("%s: skipping duplicate review ID %s", name, review_id)
+                continue
+            row = to_row(review, app_id)
             if row is not None:
                 rows.append(row)
+                if review_id:
+                    seen_review_ids.add(review_id)
         rows_by_class[review_type] = rows
         time.sleep(delay)
 
@@ -256,9 +287,10 @@ def scrape_app(
 # Output
 # --------------------------------------------------------------------------- #
 
-def write_csv(rows: List[dict], path: str) -> None:
+def write_csv(rows: List[dict], path: Path) -> None:
     """Write rows to CSV (UTF-8, all fields quoted so multiline text is safe)."""
-    with open(path, "w", newline="", encoding="utf-8") as fh:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=CSV_COLUMNS, quoting=csv.QUOTE_ALL)
         writer.writeheader()
         writer.writerows(rows)
@@ -277,7 +309,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
                    help="Reviews per class (pos/neg) per game (default: %(default)s)")
     p.add_argument("--delay", type=float, default=DEFAULT_DELAY,
                    help="Seconds to sleep between requests (default: %(default)s)")
-    p.add_argument("--output", default=DEFAULT_OUTPUT,
+    p.add_argument("--minimum-total", type=int, default=DEFAULT_MINIMUM_TOTAL,
+                   help="Exit nonzero if fewer reviews are collected (default: %(default)s)")
+    p.add_argument("--output", type=Path, default=DEFAULT_OUTPUT,
                    help="Output CSV path (default: %(default)s)")
     p.add_argument("--seed", type=int, default=42,
                    help="Shuffle seed for the final dataset (default: %(default)s)")
@@ -288,6 +322,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     args = parse_args(argv)
+    if args.per_class < 1 or args.minimum_total < 1 or args.delay < 0:
+        log.error("--per-class and --minimum-total must be positive; --delay cannot be negative")
+        return 2
     session = build_session()
 
     all_rows: List[dict] = []
@@ -305,9 +342,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     random.Random(args.seed).shuffle(all_rows)
     write_csv(all_rows, args.output)
 
-    pos = sum(r["label"] for r in all_rows)
+    pos = sum(int(r["sentiment"]) for r in all_rows)
     log.info("Done: %d total | %d positive | %d negative",
              len(all_rows), pos, len(all_rows) - pos)
+    if len(all_rows) < args.minimum_total:
+        log.error("Collected %d reviews; minimum requested was %d",
+                  len(all_rows), args.minimum_total)
+        return 2
     return 0
 
 
