@@ -20,6 +20,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
 from sklearn.dummy import DummyClassifier
+from sklearn.pipeline import FeatureUnion
 
 
 NEGATIVE_REASONS = (
@@ -49,7 +50,7 @@ POSITIVE_REASONS = (
 )
 REASONS = tuple(dict.fromkeys(NEGATIVE_REASONS + POSITIVE_REASONS))
 REASON_LOOKUP = {reason.lower(): reason for reason in REASONS}
-MODEL_VERSION = 3
+MODEL_VERSION = 4
 
 
 def normalize_reason(value: str) -> str:
@@ -68,11 +69,12 @@ def parse_sentiment(value: str, row_number: int) -> int:
     )
 
 
-def read_dataset(path: Path) -> tuple[list[str], np.ndarray, np.ndarray]:
+def read_dataset(path: Path) -> tuple[list[str], np.ndarray, np.ndarray, np.ndarray]:
     """Read and validate labeled CSV rows."""
     texts: list[str] = []
     sentiments: list[int] = []
     reason_rows: list[list[int]] = []
+    reason_is_annotated: list[bool] = []
 
     with path.open("r", encoding="utf-8-sig", newline="") as csv_file:
         reader = csv.DictReader(csv_file)
@@ -94,7 +96,8 @@ def read_dataset(path: Path) -> tuple[list[str], np.ndarray, np.ndarray]:
             sentiment = parse_sentiment(row.get(columns["sentiment"]) or "", row_number)
             raw_reasons = (row.get(reason_column) or "").strip()
             selected: set[str] = set()
-            if raw_reasons.lower() not in {"", "none", "null", "[]"}:
+            annotation_complete = raw_reasons.lower() not in {"", "null"}
+            if raw_reasons.lower() not in {"", "null", "none", "[]"}:
                 for raw_reason in raw_reasons.split("|"):
                     normalized_reason = normalize_reason(raw_reason)
                     if normalized_reason not in REASON_LOOKUP:
@@ -117,43 +120,71 @@ def read_dataset(path: Path) -> tuple[list[str], np.ndarray, np.ndarray]:
             texts.append(comment)
             sentiments.append(sentiment)
             reason_rows.append([int(reason in selected) for reason in REASONS])
+            reason_is_annotated.append(annotation_complete)
 
     if not texts:
         raise ValueError(f"{path} has a header but no labeled rows.")
-    return texts, np.asarray(sentiments, dtype=int), np.asarray(reason_rows, dtype=int)
+    return (
+        texts,
+        np.asarray(sentiments, dtype=int),
+        np.asarray(reason_rows, dtype=int),
+        np.asarray(reason_is_annotated, dtype=bool),
+    )
 
 
-def make_vectorizer() -> TfidfVectorizer:
-    # Unigrams and bigrams capture individual terms and short phrases.
-    return TfidfVectorizer(
-        lowercase=True,
-        strip_accents="unicode",
-        ngram_range=(1, 2),
-        analyzer="word",
-        sublinear_tf=True,
+def make_vectorizer() -> FeatureUnion:
+    """Combine word and character TF-IDF features for robust text matching."""
+    return FeatureUnion(
+        [
+            (
+                "word",
+                TfidfVectorizer(
+                    lowercase=True,
+                    strip_accents="unicode",
+                    ngram_range=(1, 2),
+                    min_df=2,
+                    sublinear_tf=True,
+                ),
+            ),
+            (
+                "char",
+                TfidfVectorizer(
+                    lowercase=True,
+                    strip_accents="unicode",
+                    analyzer="char_wb",
+                    ngram_range=(3, 5),
+                    min_df=2,
+                    max_features=300_000,
+                    sublinear_tf=True,
+                ),
+            ),
+        ]
     )
 
 
 def train(data_path: Path, model_path: Path) -> None:
-    texts, sentiment_targets, reason_targets = read_dataset(data_path)
+    texts, sentiment_targets, reason_targets, reason_is_annotated = read_dataset(data_path)
     if len(set(sentiment_targets.tolist())) < 2:
         raise ValueError("Training data must contain both positive and negative examples.")
 
     vectorizer = make_vectorizer()
     features = vectorizer.fit_transform(texts)
-    sentiment_model = LogisticRegression(class_weight="balanced", max_iter=1000)
+    sentiment_model = LogisticRegression(class_weight="balanced", max_iter=1200, C=3.0)
     sentiment_model.fit(features, sentiment_targets)
 
     reason_models: dict[str, Any] = {}
+    annotated_targets = reason_targets[reason_is_annotated]
     for index, reason in enumerate(REASONS):
-        targets = reason_targets[:, index]
+        targets = annotated_targets[:, index]
+        if len(targets) == 0:
+            continue
         if len(set(targets.tolist())) == 1:
             # Keep training usable while being explicit that a reason with no
             # positive examples cannot be learned from this dataset.
             model = DummyClassifier(strategy="constant", constant=int(targets[0]))
         else:
             model = LogisticRegression(class_weight="balanced", max_iter=1000)
-        model.fit(features, targets)
+        model.fit(features[reason_is_annotated], targets)
         reason_models[reason] = model
 
     model_path.parent.mkdir(parents=True, exist_ok=True)
@@ -164,17 +195,22 @@ def train(data_path: Path, model_path: Path) -> None:
             "vectorizer": vectorizer,
             "sentiment_model": sentiment_model,
             "reason_models": reason_models,
+            "reason_annotation_count": int(reason_is_annotated.sum()),
         },
         model_path,
     )
 
     print(f"Trained on {len(texts)} labeled comments.")
     print(f"Saved model to {model_path}")
+    if not reason_is_annotated.any():
+        print("Warning: no reasons have been annotated; reason predictions will be empty.")
     for index, reason in enumerate(REASONS):
-        positives = int(reason_targets[:, index].sum())
+        if not reason_is_annotated.any():
+            break
+        positives = int(annotated_targets[:, index].sum())
         if positives == 0:
             print(f"Warning: no training examples labeled '{reason}'; it will always predict absent.")
-        elif positives == len(texts):
+        elif positives == len(annotated_targets):
             print(f"Warning: every training example is labeled '{reason}'; it will always predict present.")
 
 
@@ -199,7 +235,9 @@ def predict_rows(model: dict[str, Any], texts: list[str], threshold: float) -> l
         allowed_reasons = POSITIVE_REASONS if sentiment == 1 else NEGATIVE_REASONS
         reason_scores: dict[str, float] = {}
         for reason in allowed_reasons:
-            reason_model = model["reason_models"][reason]
+            reason_model = model["reason_models"].get(reason)
+            if reason_model is None:
+                continue
             probabilities = reason_model.predict_proba(features[row_index])[0]
             positive_class = np.flatnonzero(reason_model.classes_ == 1)
             # A constant classifier has only one probability column.
@@ -219,7 +257,7 @@ def predict_rows(model: dict[str, Any], texts: list[str], threshold: float) -> l
 
 
 def evaluate(data_path: Path, model_path: Path, threshold: float) -> None:
-    texts, sentiment_targets, reason_targets = read_dataset(data_path)
+    texts, sentiment_targets, reason_targets, reason_is_annotated = read_dataset(data_path)
     model = load_model(model_path)
     predictions = predict_rows(model, texts, threshold)
     sentiment_predictions = np.asarray([item["sentiment"] for item in predictions])
@@ -230,12 +268,17 @@ def evaluate(data_path: Path, model_path: Path, threshold: float) -> None:
     print(f"Evaluated on {len(texts)} held-out comments")
     print(f"Sentiment accuracy: {accuracy_score(sentiment_targets, sentiment_predictions):.3f}")
     print(f"Sentiment macro F1: {f1_score(sentiment_targets, sentiment_predictions, average='macro', zero_division=0):.3f}")
-    print(f"Reason micro F1: {f1_score(reason_targets, reason_predictions, average='micro', zero_division=0):.3f}")
-    print(f"Reason macro F1: {f1_score(reason_targets, reason_predictions, average='macro', zero_division=0):.3f}")
-    print("\nPer-reason F1:")
-    for index, reason in enumerate(model["reasons"]):
-        score = f1_score(reason_targets[:, index], reason_predictions[:, index], zero_division=0)
-        print(f"  {reason}: {score:.3f}")
+    if reason_is_annotated.any():
+        known_targets = reason_targets[reason_is_annotated]
+        known_predictions = reason_predictions[reason_is_annotated]
+        print(f"Reason micro F1: {f1_score(known_targets, known_predictions, average='micro', zero_division=0):.3f}")
+        print(f"Reason macro F1: {f1_score(known_targets, known_predictions, average='macro', zero_division=0):.3f}")
+        print("\nPer-reason F1:")
+        for index, reason in enumerate(model["reasons"]):
+            score = f1_score(known_targets[:, index], known_predictions[:, index], zero_division=0)
+            print(f"  {reason}: {score:.3f}")
+    else:
+        print("Reason metrics skipped: the held-out CSV has no annotated reasons.")
 
 
 def main() -> None:
