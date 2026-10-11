@@ -1,3 +1,4 @@
+
 import csv
 
 
@@ -42,8 +43,12 @@ def clean_reviews(input_file, output_file, conflicts):
         "fht6u", "ed3wq", "wdawd", "dsfds",
         "kljh", "drff", "asds", "fddfff",
         "jbyfkb", "dddd", "eere", "gfdgfd",
-        "yjtyh", "sddsad", "gfgf",
-        "....", "******", "‎"
+        "yjtyh", "sddsad", "gfgf", "....",
+        "******", "‎", "dfhgrdfg", "rfgdgfd",
+        "llllllllllll", "lllplplp", "ffghhhjgffffgh",
+        "xfcghbdmbnjvhgchrfdfh", "gvffhsbddfgsbbfd",
+        "ggggggggggggggggggggggggggggggggg",
+        "brvrfgh"
     ]
 
     punctuation = [".", "..", ",", "!", "?", ";", "،"]
@@ -124,25 +129,24 @@ def clean_reviews(input_file, output_file, conflicts):
         writer.writerows(reviews)
 
     print("Cleaning completed.")
-    print("Final number of reviews:", len(reviews))
     print("Empty reviews removed:", empty_count)
     print("Duplicate reviews removed:", duplicate_count)
     print("Meaningless reviews removed:", meaningless_count)
     print("Conflicting review rows removed:", conflict_count)
     print("Incorrect labels corrected:", corrected_count)
+    print("Final number of reviews:", len(reviews))
 
 
 def count_labels(input_file):
     positive = 0
     negative = 0
 
-    with open(input_file, "r", encoding="utf-8", newline="") as file:
+    with open(input_file, "r", encoding="utf-8-sig", newline="") as file:
         reader = csv.DictReader(file)
 
         for row in reader:
             if row["label"] == "1":
                 positive += 1
-
             elif row["label"] == "0":
                 negative += 1
 
