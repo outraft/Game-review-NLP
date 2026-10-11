@@ -1,10 +1,6 @@
-<<<<<<< HEAD
-### Dataset Distribution
-=======
 ## Dataset Distribution
 
 The original dataset contained 3,000 Steam game reviews. After data cleaning and label checks, 2,563 reviews remained. The dataset was then divided into training and validation sets.
->>>>>>> a0e7d1b (Improve README dataset documentation)
 
 | Category | Number of Reviews |
 |---|---:|
@@ -33,10 +29,6 @@ python src/cleaning.py
 python src/split_data.py
 ```
 
-<<<<<<< HEAD
-Some short, multilingual, or ambiguous reviews may still require manual review. The dataset has not been fully verified for sentiment-label accuracy.
-=======
 ## Notes
 
-Some short, multilingual, or ambiguous reviews may still require manual inspection. Only selected sentiment labels have been corrected, so the entire dataset has not yet been manually verified for label accuracy.
->>>>>>> a0e7d1b (Improve README dataset documentation)
+Some short, multilingual, or ambiguous reviews may still require manual review. Only selected sentiment labels have been corrected, so the entire dataset has not yet been manually verified for label accuracy.
