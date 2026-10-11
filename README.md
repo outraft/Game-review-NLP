@@ -1,34 +1,18 @@
-## Dataset Distribution
+## Data Quality and Limitations
 
-The original dataset contained 3,000 Steam game reviews. After data cleaning and label checks, 2,563 reviews remained. The dataset was then divided into training and validation sets.
+The Steam review dataset was cleaned and prepared for sentiment classification. The cleaning process included removing duplicate reviews, filtering meaningless comments, identifying conflicting sentiment labels, and correcting three selected labels.
+
+Additional manual review and label verification may further improve data quality, especially for short, multilingual, or ambiguous reviews.
+
+### Final Dataset Summary
 
 | Category | Number of Reviews |
 |---|---:|
 | Original dataset | 3,000 |
-| Cleaned dataset | 2,563 |
-| Positive reviews | 1,146 |
-| Negative reviews | 1,417 |
-| Training set (80%) | 2,049 |
-| Validation set (20%) | 514 |
+| Cleaned dataset | 2,554 |
+| Positive reviews | 1,140 |
+| Negative reviews | 1,414 |
+| Training set (80%) | 2,043 |
+| Validation set (20%) | 511 |
 
-## Project Files
-
-- `src/cleaning.py` — Removes duplicate and selected meaningless reviews, checks conflicting sentiment labels, and corrects three selected labels.
-- `src/split_data.py` — Divides the cleaned dataset into training and validation sets.
-- `steam_reviews_cleaned.csv` — Contains the cleaned reviews.
-- `conflicting_reviews.csv` — Lists review texts identified with conflicting sentiment labels.
-- `train.csv` — Contains the training data.
-- `validation.csv` — Contains the validation data.
-
-## How to Run
-
-Run the following commands from the project directory:
-
-```bash
-python src/cleaning.py
-python src/split_data.py
-```
-
-## Notes
-
-Some short, multilingual, or ambiguous reviews may still require manual review. Only selected sentiment labels have been corrected, so the entire dataset has not yet been manually verified for label accuracy.
+The dataset was split into 80% training data and 20% validation data. We also checked that the same reviews do not appear in both datasets.
