@@ -30,7 +30,8 @@ src/
 
 contributions/
 ├── CONTRIBUTORS.md        # team contribution index
-└── ERSİN_EGE_TEZGULER_2409011008_outraft.md # individual contribution record
+├── ERSİN_EGE_TEZGULER_2409011008_outraft.md # individual contribution record
+└── OMAR_ALTUHAIF_2309116431_omaraltuhaif.md # individual contribution record
 
 tests/
 ├── test_classifier.py     # label parsing and reason-annotation checks
