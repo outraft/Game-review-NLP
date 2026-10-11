@@ -19,10 +19,17 @@ project makes no claim that it owns or can sublicense those reviews.
 ## Ethical and legal handling
 
 The review-level CSVs (raw, cleaned, split, pseudo-labeled, and conflict-audit)
-are generated locally and excluded from the repository and Git history because
-they contain third-party user-generated text whose redistribution rights the
-project does not hold. `data/annotated/reason_summary.csv` contains aggregate
-counts/scores only, not review comments.
+are generated locally and were removed from the working tree and the `master`
+and `staging` branch histories because they contain third-party user-generated
+text whose redistribution rights the project does not hold.
+`data/annotated/reason_summary.csv` contains aggregate counts/scores only, not
+review comments.
+
+The repository had previously published pull requests. GitHub still advertises
+`refs/pull/*/head` references to older commits, which cannot be force-updated by
+the repository owner. A GitHub Support request is required to purge any cached
+pull-request refs/views that retain the removed files. Until that request is
+completed, do not claim the content has been erased from every GitHub copy.
 
 This project does not claim ownership of Steam reviews or grant a license to
 them. Local collection and analysis remain subject to the applicable Steam

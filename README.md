@@ -56,13 +56,14 @@ data/annotated/splits/     # generated locally; review-level CSVs are git-ignore
 models/                    # locally trained model files (git-ignored)
 ```
 
-The row-level CSVs are excluded from this repository because they contain
+The row-level CSVs are excluded from the current branches because they contain
 third-party user-generated review text, and this project does not hold an
-independent license to redistribute it. The statistics and benchmark results
-below describe the latest local run, not data files shipped with this clone.
-The scraper uses recent reviews, so a future run may produce different rows and
-metrics. The trained model file is also not committed; recreate it with the
-commands below.
+independent license to redistribute it. The branch histories were rewritten to
+remove those files. GitHub still advertises old pull-request refs, so a complete
+server-side purge is pending GitHub Support. The statistics below describe the
+latest local run, not files shipped with this clone. The scraper uses recent
+reviews, so a future run may produce different rows and metrics. The trained
+model file is also not committed; recreate it with the commands below.
 
 ## Current dataset
 
@@ -132,12 +133,12 @@ the model toward popular reviews.
 
 The root `LICENSE` provides GPL-3.0 terms for this project's original code.
 Steam review text is third-party user-generated content and is **not** covered
-by that code license or relicensed by this project. Row-level review CSVs are
-excluded to respect authors' rights and avoid implying redistribution
-permission the project does not hold. See
-[`data/DATA_LICENSE.md`](data/DATA_LICENSE.md) for source and rights details.
-The pretrained zero-shot model has its own MIT license, linked in the model
-section below.
+by that code license or relicensed by this project. Row-level review CSVs were
+removed from the current branch histories to respect authors' rights and avoid
+implying redistribution permission the project does not hold. Older GitHub
+pull-request refs may still expose prior commits; see
+[`data/DATA_LICENSE.md`](data/DATA_LICENSE.md). The pretrained zero-shot model
+has its own MIT license, linked in the model section below.
 
 ## Sentiment model and results
 
