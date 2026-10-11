@@ -1,4 +1,10 @@
+<<<<<<< HEAD
 ### Dataset Distribution
+=======
+## Dataset Distribution
+
+The original dataset contained 3,000 Steam game reviews. After data cleaning and label checks, 2,563 reviews remained. The dataset was then divided into training and validation sets.
+>>>>>>> a0e7d1b (Improve README dataset documentation)
 
 | Category | Number of Reviews |
 |---|---:|
@@ -9,20 +15,28 @@
 | Training set (80%) | 2,049 |
 | Validation set (20%) | 514 |
 
-### Files
+## Project Files
 
-- `src/cleaning.py` — Cleans reviews, checks conflicting labels, and corrects selected sentiment labels.
-- `src/split_data.py` — Splits the cleaned dataset into training and validation sets.
-- `steam_reviews_cleaned.csv` — Final cleaned dataset.
-- `conflicting_reviews.csv` — Reviews identified with conflicting labels.
-- `train.csv` — Training dataset.
-- `validation.csv` — Validation dataset.
+- `src/cleaning.py` — Removes duplicate and selected meaningless reviews, checks conflicting sentiment labels, and corrects three selected labels.
+- `src/split_data.py` — Divides the cleaned dataset into training and validation sets.
+- `steam_reviews_cleaned.csv` — Contains the cleaned reviews.
+- `conflicting_reviews.csv` — Lists review texts identified with conflicting sentiment labels.
+- `train.csv` — Contains the training data.
+- `validation.csv` — Contains the validation data.
 
-### Run the Scripts
+## How to Run
+
+Run the following commands from the project directory:
 
 ```bash
 python src/cleaning.py
 python src/split_data.py
 ```
 
+<<<<<<< HEAD
 Some short, multilingual, or ambiguous reviews may still require manual review. The dataset has not been fully verified for sentiment-label accuracy.
+=======
+## Notes
+
+Some short, multilingual, or ambiguous reviews may still require manual inspection. Only selected sentiment labels have been corrected, so the entire dataset has not yet been manually verified for label accuracy.
+>>>>>>> a0e7d1b (Improve README dataset documentation)
