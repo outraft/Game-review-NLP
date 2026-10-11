@@ -1,55 +1,44 @@
 ## Data Cleaning and Preparation
 
-Before model training, we cleaned and prepared the Steam reviews dataset using Python.
+The Steam review dataset was cleaned and prepared for sentiment classification.
 
 ### Data Cleaning
 
-We started with 3,000 raw reviews.
+The original dataset contained 3,000 reviews. The cleaning process included:
 
-- Removed empty and duplicate comments.
-- Removed comments containing only numbers or punctuation.
-- Removed selected meaningless comments.
-- Checked positive and negative sentiment labels.
-- Identified and separated reviews with conflicting labels.
+- Removing empty and duplicate reviews.
+- Removing numeric-only and punctuation-only comments.
+- Filtering selected meaningless or random-text reviews.
+- Identifying reviews with conflicting sentiment labels.
+- Removing reviews with conflicting labels.
 
-After cleaning, 2,598 reviews remained.
+After cleaning, the final dataset contains **2,580 reviews**.
 
-### Label Distribution
+### Dataset Distribution
 
-| Sentiment | Reviews |
+| Category | Number of Reviews |
 |---|---:|
-| Positive (1) | 1,168 |
-| Negative (0) | 1,430 |
-| Total | 2,598 |
+| Original dataset | 3,000 |
+| Cleaned dataset | 2,580 |
+| Positive reviews | 1,155 |
+| Negative reviews | 1,425 |
+| Training set (80%) | 2,064 |
+| Validation set (20%) | 516 |
 
-### Training and Validation Split
+### Files
 
-We divided the cleaned dataset into training and validation sets using an approximately 80/20 split.
+- `src/cleaning.py` — Cleans the dataset and checks conflicting labels.
+- `src/split_data.py` — Splits the cleaned dataset into training and validation sets.
+- `steam_reviews_cleaned.csv` — Final cleaned dataset.
+- `conflicting_reviews.csv` — Reviews identified with conflicting labels.
+- `train.csv` — Training dataset.
+- `validation.csv` — Validation dataset.
 
-We separated positive and negative reviews before splitting to keep a similar sentiment distribution in both datasets.
-
-We used `random.seed(42)` to make the results reproducible.
-
-| Dataset | Reviews |
-|---|---:|
-| Training | 2,078 |
-| Validation | 520 |
-
-### Data Preparation Files
-
-- `src/cleaning.py` - Cleans reviews and checks conflicting labels.
-- `src/split_data.py` - Splits the cleaned data into training and validation sets.
-- `steam_reviews_raw.csv` - Original dataset.
-- `steam_reviews_cleaned.csv` - Cleaned dataset.
-- `conflicting_reviews.csv` - Reviews with conflicting labels.
-- `train.csv` - Training dataset.
-- `validation.csv` - Validation dataset.
-
-### Run Data Preparation
+### Run the Scripts
 
 ```bash
 python src/cleaning.py
 python src/split_data.py
 ```
 
-The prepared data contains sentiment labels. The model's required reason labels and column format should be checked before training.
+The dataset includes positive and negative sentiment labels. Some reviews are multilingual, and reason-category annotations have not yet been added.
