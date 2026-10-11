@@ -46,24 +46,28 @@ root files:
 └── LICENSE                   # GPL-3.0 for original code; see data license notice
 
 data/
-├── raw/                   # scraped Steam export
-├── processed/             # cleaned review CSV
-├── splits/                # sentiment train/validation CSVs
-├── annotated/             # zero-shot reason predictions, summary, and splits
-├── audit/                 # conflicting review text removed during cleaning
-└── DATA_LICENSE.md        # data source and third-party rights notice
+├── DATA_LICENSE.md        # data source and third-party rights notice
+└── annotated/
+    └── reason_summary.csv # aggregate counts only; contains no review text
+
+data/raw/, data/processed/, data/splits/, data/audit/, and
+data/annotated/splits/     # generated locally; review-level CSVs are git-ignored
 
 models/                    # locally trained model files (git-ignored)
 ```
 
-The redundant legacy V1 CSV snapshots are excluded to keep the repository
-focused on the current reproducible pipeline. The trained model file is not
-committed; recreate it with the train commands below.
+The row-level CSVs are excluded from this repository because they contain
+third-party user-generated review text, and this project does not hold an
+independent license to redistribute it. The statistics and benchmark results
+below describe the latest local run, not data files shipped with this clone.
+The scraper uses recent reviews, so a future run may produce different rows and
+metrics. The trained model file is also not committed; recreate it with the
+commands below.
 
 ## Current dataset
 
-The current scrape contains **12,000 rows**: 1,000 positive and 1,000 negative
-review requests for each of six games:
+The latest local scrape contained **12,000 rows**: 1,000 positive and 1,000
+negative review requests for each of six games:
 
 | Game | Steam App ID |
 | --- | ---: |
@@ -75,10 +79,12 @@ review requests for each of six games:
 | ELDEN RING | 1245620 |
 
 The API filters by review type, but a few returned Steam labels did not match
-the requested type, so the raw labels are 5,997 negative and 6,003 positive.
+the requested type, so the raw labels were 5,997 negative and 6,003 positive.
 Cleaning removed 628 rows whose identical text had conflicting sentiments and
-941 repeated comment texts. The processed file has **10,431 reviews**: 5,699
-negative and 4,732 positive. Empty comments removed: 0.
+941 repeated comment texts. The latest processed local run had **10,431
+reviews**: 5,699 negative and 4,732 positive. Empty comments removed: 0. The
+corresponding review-level CSVs are generated locally and are not included in
+this repository.
 
 | Cleaned game | Total | Negative | Positive |
 | --- | ---: | ---: | ---: |
@@ -89,7 +95,7 @@ negative and 4,732 positive. Empty comments removed: 0.
 | Baldur's Gate 3 | 1,822 | 959 | 863 |
 | ELDEN RING | 1,759 | 949 | 810 |
 
-The current stratified 80/20 split has **8,344 training** and **2,087
+The latest stratified 80/20 split had **8,344 training** and **2,087
 validation** reviews. It keeps all six game titles represented in both sets.
 The train split contains 4,559 negative and 3,785 positive reviews; validation
 contains 1,140 negative and 947 positive reviews. The additional game-grouped
@@ -97,7 +103,8 @@ cross-validation result below tests performance on titles held out from training
 
 ## CSV schema and score fields
 
-Raw and processed CSVs share this schema:
+Locally generated raw and processed CSVs share this schema; row-level CSVs are
+ignored and are not shipped in this repository:
 
 | Column | Meaning |
 | --- | --- |
@@ -125,12 +132,12 @@ the model toward popular reviews.
 
 The root `LICENSE` provides GPL-3.0 terms for this project's original code.
 Steam review text is third-party user-generated content and is **not** covered
-by that code license or relicensed by this project. See
-[`data/DATA_LICENSE.md`](data/DATA_LICENSE.md) for sources, terms to check, and
-the public-redistribution warning. Public access to Steam's endpoint does not
-itself grant permission to republish a bulk review dump. Confirm redistribution
-rights with the instructor/Valve before publishing the CSVs. The pretrained
-zero-shot model has its own MIT license, linked in the model section below.
+by that code license or relicensed by this project. Row-level review CSVs are
+excluded to respect authors' rights and avoid implying redistribution
+permission the project does not hold. See
+[`data/DATA_LICENSE.md`](data/DATA_LICENSE.md) for source and rights details.
+The pretrained zero-shot model has its own MIT license, linked in the model
+section below.
 
 ## Sentiment model and results
 
@@ -363,13 +370,13 @@ python src/annotate_reasons.py --limit 20 --output data/annotated/smoke_test.csv
 python src/annotate_reasons.py
 ```
 
-The full output files are:
+Running the annotator locally produces:
 
-- `data/annotated/steam_reviews_reason_predictions.csv`: original review
+- `data/annotated/steam_reviews_reason_predictions.csv` (local and git-ignored): original review
   columns plus `reason`, per-category `reason_scores`, `reason_source`,
   `reason_model`, and `reason_threshold`.
-- `data/annotated/reason_summary.csv`: counts and mean scores by sentiment and
-  reason.
+- `data/annotated/reason_summary.csv`: aggregate counts and mean scores by
+  sentiment and reason; this contains no review comments and is retained.
 
 The cutoff defaults to `0.7`; adjust it with `--threshold 0.6` after reviewing
 sample predictions. `--batch-size` controls how many reviews are checkpointed
@@ -448,7 +455,8 @@ reviews. `--minimum-total` sets the required total before the command exits
 successfully. Cleaning and split paths can be changed with `--input`, `--output`,
 `--conflicts`, and `--output-dir`; see `--help` on each script.
 
-Outputs:
+These commands create the following files locally (review-level CSVs are
+git-ignored and are not part of the public repository):
 
 1. `data/raw/steam_reviews.csv` — scraped export.
 2. `data/processed/steam_reviews_cleaned.csv` — normalized, deduplicated

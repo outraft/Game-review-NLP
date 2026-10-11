@@ -160,6 +160,15 @@ env.bak/
 venv.bak/
 models/
 
+# Review-level Steam data is excluded because this project does not hold redistribution rights.
+/data/raw/*.csv
+/data/processed/*.csv
+/data/splits/*.csv
+/data/audit/*.csv
+/data/annotated/*.csv
+!/data/annotated/reason_summary.csv
+/data/annotated/splits/*.csv
+
 # Spyder project settings
 .spyderproject
 .spyproject

@@ -16,6 +16,20 @@ third-party content included in the CSV files. Review text remains subject to
 the rights of its authors and the terms that apply to Steam content. The
 project makes no claim that it owns or can sublicense those reviews.
 
+## Ethical and legal handling
+
+The review-level CSVs (raw, cleaned, split, pseudo-labeled, and conflict-audit)
+are generated locally and excluded from the repository and Git history because
+they contain third-party user-generated text whose redistribution rights the
+project does not hold. `data/annotated/reason_summary.csv` contains aggregate
+counts/scores only, not review comments.
+
+This project does not claim ownership of Steam reviews or grant a license to
+them. Local collection and analysis remain subject to the applicable Steam
+terms and the review authors' rights. Do not redistribute review-text files
+without appropriate permission. This file is a provenance/rights notice, not a
+data license.
+
 Relevant sources:
 
 - [Steam User Reviews API documentation](https://partner.steamgames.com/doc/store/getreviews)
@@ -23,13 +37,9 @@ Relevant sources:
 - [Steam Web API Terms of Use](https://steamcommunity.com/dev/apiterms)
 
 Access to a public endpoint should not be treated as permission to republish a
-bulk copy. Before making a repository containing the review-text CSVs public,
-the team must verify that redistribution is permitted by the applicable Steam
-terms and the review authors' rights, and follow any instructor or
-institutional requirements. If permission cannot be confirmed, remove the
-review-text CSVs from the public release and provide the scraper and
-reproducible preparation steps instead. Aggregate counts and project-authored
-code are separate from the underlying review text.
+bulk copy. Verify the applicable Steam terms and review authors' rights before
+any redistribution. Aggregate counts and project-authored code are separate
+from the underlying review text.
 
 The zero-shot reason labels are machine-generated pseudo-labels. The pretrained
 DeBERTa model has its own MIT license and is identified/pinned in the README;
