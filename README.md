@@ -29,10 +29,11 @@ src/
 └── classifier.py          # train, evaluate, and predict sentiment/reasons
 
 contributions/
-├── ERSİN_EGE_TEZGULER_2409011008_outraft.md # individual contribution record
-├── MELIKE_METE_2609131013_melikemetee.md    # individual contribution record
-├── DORUK_UNSAL_2309011046_Hadessd4.md       # individual contribution record
-└── OMAR_ALTUHAIF_2309116431_omaraltuhaif.md # individual contribution record
+├── ERSİN_EGE_TEZGULER_2409011008_outraft.md   # individual contribution record
+├── MELIKE_METE_2609131013_melikemetee.md      # individual contribution record
+├── DORUK_UNSAL_2309011046_Hadessd4.md         # individual contribution record
+├── KHALID_HAGI-AINTE_220911368_khalidhagi3.md # individual contribution record
+└── OMAR_ALTUHAIF_2309116431_omaraltuhaif.md   # individual contribution record
 
 tests/
 ├── test_classifier.py     # label parsing and reason-annotation checks
